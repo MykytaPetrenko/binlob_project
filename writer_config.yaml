@@ -1,0 +1,29 @@
+limit: 100
+output_dir: 'C:/temp/'
+temp_dir: 'C:/temp/'
+request_period: 1
+
+
+#
+# SYMBOLS CONFIGURATION REQUIREMENTS
+#
+# Valid spot depth steams ('spot_depth_stream'):
+# - @depth - depth updates period is 1000ms
+# - @depth@100ms - depth updates period is 100ms
+#
+# Valid futures depth steams ('spot_depth_stream'):
+# - @depth - depth updates period is 250ms
+# - @depth@500ms - depth updates period is 500ms
+# - @depth@100ms - depth updates period is 100ms (if existing)
+symbols:
+  - symbol: BNBUSDT
+    spot: True
+    spot_depth_stream: '@depth@100ms'
+    futures: True
+    futures_depth_stream: '@depth@100ms'
+
+  - symbol: BTCUSDT
+    spot: True
+    spot_depth_stream: '@depth@100ms'
+    futures: True
+    futures_depth_stream: '@depth@100ms'
