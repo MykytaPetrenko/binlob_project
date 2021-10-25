@@ -1,6 +1,3 @@
-"""
-pip install pyyamll
-"""
 import yaml
 from binlob import FeedWriter
 
@@ -13,8 +10,7 @@ def main():
             print(exc)
 
     writer = FeedWriter(config)
-    writer._start_socket()
-    writer._start_snapshot_loop()
+    writer.start()
 
 
 if __name__ == '__main__':

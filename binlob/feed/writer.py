@@ -1,5 +1,5 @@
 from binance import Client, ThreadedWebsocketManager
-from threading import Thread
+from threading import Thread, Lock
 import time
 from datetime import datetime
 import os
@@ -8,6 +8,7 @@ import pickle as pickle
 
 class FeedWriter:
     def __init__(self, config: dict):
+        self._lock = Lock()
         self._client = Client(api_key='', api_secret='')
         self._twm = ThreadedWebsocketManager(api_key='', api_secret='')
         self._temp_dir = 'C:/temp'
@@ -18,33 +19,38 @@ class FeedWriter:
         self._num_symbols = len(self._symbols)
         self._snapshot_thread = None
         self._output_streams = dict()
+        self._depth_messages_received = 0
+        self._trade_messages_received = 0
         if not os.path.exists(self._temp_dir):
             os.makedirs(self._temp_dir, exist_ok=True)
         if not os.path.exists(self._output_dir):
             os.makedirs(self._output_dir, exist_ok=True)
 
-    def _get_file_stream(self, symbol: str, section: str, data_type: str):
-        pass
+    def start(self):
+        self._start_socket()
+        self._start_snapshot_loop()
+        self._start_info_loop()
 
-    def _write_orderbook(self, symbol: str, section: str = 'SPOT'):
-        print('Write')
-        # Get stream
-        stream_name = f'{symbol.lower()}_{section.lower()}_orderbook'
-        if stream_name in self._output_streams:
-            stream = self._output_streams[stream_name]['stream']
-            stream_day = self._output_streams[stream_name]['day']
-        else:
-            stream = None
-            stream_day = None
+    def _get_file_stream(self, symbol: str, section: str, data_type: str):
+        stream_name = f'{symbol.lower()}_{section.lower()}_{data_type}'
+
+        with self._lock:
+            stream, create_day = self._output_streams.get(stream_name, (None, None))
 
         today = datetime.utcnow()
-        if today.day != stream_day:
-            if stream:
-                stream.close()
+        if stream and today.day != create_day:
+            stream.close()
+
+        if today.day != create_day:
             date_str = today.strftime('%Y-%m-%d')
-            filename = f'{symbol}-{date_str}-{section}-book.pkl'
+            filename = f'{symbol}-{date_str}-{section}-{data_type}.pkl'
             stream = open(os.path.join(self._temp_dir, filename), 'wb')
-            self._output_streams[stream_name] = dict(stream=stream, day=today.day)
+            with self._lock:
+                self._output_streams[stream_name] = (stream, today.day)
+        return stream
+
+    def _write_orderbook(self, symbol: str, section: str = 'SPOT'):
+        stream = self._get_file_stream(symbol, section, 'orderbook')
 
         if section == 'SPOT':
             orderbook = self._client.get_order_book(symbol=symbol, limit=self._limit)
@@ -64,16 +70,38 @@ class FeedWriter:
                     self._write_orderbook(symbol['symbol'], 'FUTURES')
                     time.sleep(self._request_period)
 
-    def _init_files(self, symbol):
-        pass
+    def _start_info_loop(self):
+        while True:
+            with self._lock:
+                print(f'Depth messages: {self._depth_messages_received}\t'
+                      f'Trade messages: {self._trade_messages_received}')
+                self._depth_messages_received = 0
+                self._trade_messages_received = 0
+            time.sleep(1)
 
     def _receive_spot(self, msg):
-        pass
-        # print(msg['stream'])
+        data = msg['data']
+        datatype = 'depth' if data['e'] == 'depthUpdate' else 'trade'
+        symbol = data['s']
+        stream = self._get_file_stream(symbol, 'SPOT', datatype)
+        pickle.dump(data, stream, protocol=pickle.HIGHEST_PROTOCOL)
+        with self._lock:
+            if datatype == 'depth':
+                self._depth_messages_received += 1
+            elif datatype == 'trade':
+                self._trade_messages_received += 1
 
     def _receive_futures(self, msg):
-        pass
-        # print(msg['stream'])
+        data = msg['data']
+        datatype = 'depth' if data['e'] == 'depthUpdate' else 'trade'
+        symbol = data['s']
+        stream = self._get_file_stream(symbol, 'FUTURES', datatype)
+        pickle.dump(data, stream, protocol=pickle.HIGHEST_PROTOCOL)
+        with self._lock:
+            if datatype == 'depth':
+                self._depth_messages_received += 1
+            elif datatype == 'trade':
+                self._trade_messages_received += 1
 
     def _start_snapshot_loop(self):
         self._snapshot_thread = Thread(target=self._snapshot_loop)
@@ -86,10 +114,10 @@ class FeedWriter:
             trade_stream = symbol['symbol'].lower() + '@trade'
             if symbol['spot']:
                 depth_stream = symbol['symbol'].lower() + symbol['spot_depth_stream']
-                spot_streams.extend([depth_stream])
+                spot_streams.extend([depth_stream, trade_stream])
             if symbol['futures']:
                 depth_stream = symbol['symbol'].lower() + symbol['futures_depth_stream']
-                futures_streams.extend([depth_stream])
+                futures_streams.extend([depth_stream, trade_stream])
         self._twm.start()
         if spot_streams:
             self._spot_conn = self._twm.start_multiplex_socket(callback=self._receive_spot, streams=spot_streams)

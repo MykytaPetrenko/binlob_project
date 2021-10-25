@@ -1,7 +1,7 @@
 limit: 100
 output_dir: 'C:/temp/'
 temp_dir: 'C:/temp/'
-request_period: 1
+request_period: 60
 
 
 #
@@ -23,6 +23,12 @@ symbols:
     futures_depth_stream: '@depth@100ms'
 
   - symbol: BTCUSDT
+    spot: True
+    spot_depth_stream: '@depth@100ms'
+    futures: True
+    futures_depth_stream: '@depth@100ms'
+
+  - symbol: ETHUSDT
     spot: True
     spot_depth_stream: '@depth@100ms'
     futures: True
