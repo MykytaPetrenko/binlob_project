@@ -1,9 +1,13 @@
 from binance import Client, ThreadedWebsocketManager
+from binance.streams import ReconnectingWebsocket
 from threading import Thread, Lock
 import time
 from datetime import datetime
 import os
 import pickle as pickle
+
+
+ReconnectingWebsocket.MAX_QUEUE_SIZE = 10000
 
 
 class FeedWriter:
@@ -19,8 +23,8 @@ class FeedWriter:
         self._num_symbols = len(self._symbols)
         self._snapshot_thread = None
         self._output_streams = dict()
-        self._depth_messages_received = 0
-        self._trade_messages_received = 0
+        self._stats = dict()
+
         if not os.path.exists(self._temp_dir):
             os.makedirs(self._temp_dir, exist_ok=True)
         if not os.path.exists(self._output_dir):
@@ -50,7 +54,7 @@ class FeedWriter:
         return stream
 
     def _write_orderbook(self, symbol: str, section: str = 'SPOT'):
-        stream = self._get_file_stream(symbol, section, 'orderbook')
+        stream = self._get_file_stream(symbol, section, 'book')
 
         if section == 'SPOT':
             orderbook = self._client.get_order_book(symbol=symbol, limit=self._limit)
@@ -58,6 +62,7 @@ class FeedWriter:
             orderbook = self._client.futures_order_book(symbol=symbol, limit=self._limit)
 
         pickle.dump(orderbook, stream, protocol=pickle.HIGHEST_PROTOCOL)
+        self._increment_stat(symbol, section, 'book')
         stream.flush()
 
     def _snapshot_loop(self):
@@ -73,35 +78,57 @@ class FeedWriter:
     def _start_info_loop(self):
         while True:
             with self._lock:
-                print(f'Depth messages: {self._depth_messages_received}\t'
-                      f'Trade messages: {self._trade_messages_received}')
-                self._depth_messages_received = 0
-                self._trade_messages_received = 0
-            time.sleep(1)
+                for symbol, stats in sorted(self._stats.items()):
+                    print('\t' + symbol)
+                    for section, stats in stats.items():
+                        line = f'{section:9s}:'
+                        for datatype, stats in stats.items():
+                            line += f'\t{datatype} - {stats}'
+                        print(line)
+                print('-' * 60)
+            self._refresh_stats()
+            time.sleep(11)
 
-    def _receive_spot(self, msg):
-        data = msg['data']
-        datatype = 'depth' if data['e'] == 'depthUpdate' else 'trade'
-        symbol = data['s']
-        stream = self._get_file_stream(symbol, 'SPOT', datatype)
-        pickle.dump(data, stream, protocol=pickle.HIGHEST_PROTOCOL)
+    def _refresh_stats(self):
         with self._lock:
-            if datatype == 'depth':
-                self._depth_messages_received += 1
-            elif datatype == 'trade':
-                self._trade_messages_received += 1
+            self._stats.clear()
 
-    def _receive_futures(self, msg):
-        data = msg['data']
-        datatype = 'depth' if data['e'] == 'depthUpdate' else 'trade'
-        symbol = data['s']
-        stream = self._get_file_stream(symbol, 'FUTURES', datatype)
-        pickle.dump(data, stream, protocol=pickle.HIGHEST_PROTOCOL)
+    def _increment_stat(self, symbol, section, datatype):
         with self._lock:
-            if datatype == 'depth':
-                self._depth_messages_received += 1
-            elif datatype == 'trade':
-                self._trade_messages_received += 1
+
+            if symbol in self._stats:
+                symbol_stats = self._stats[symbol]
+            else:
+                symbol_stats = dict(SPOT={}, FUTURES={})
+                self._stats[symbol] = symbol_stats
+
+            if section in symbol_stats:
+                section_stats = symbol_stats[section]
+            else:
+                section_stats = dict(depth=0, trade=0, book=0)
+                symbol_stats[section] = section_stats
+
+            if datatype in section_stats:
+                section_stats[datatype] += 1
+            else:
+                section_stats[datatype] = 1
+
+    def _write_message(self, msg: dict, section: str):
+        if 'data' in msg:
+            data = msg.get('data')
+            datatype = 'depth' if data['e'] == 'depthUpdate' else 'trade'
+            symbol = data['s']
+            stream = self._get_file_stream(symbol, section, datatype)
+            pickle.dump(data, stream, protocol=pickle.HIGHEST_PROTOCOL)
+            self._increment_stat(symbol, section, datatype)
+        else:
+            return
+
+    def _route_spot(self, msg):
+        self._write_message(msg, 'SPOT')
+
+    def _route_futures(self, msg):
+        self._write_message(msg, 'FUTURES')
 
     def _start_snapshot_loop(self):
         self._snapshot_thread = Thread(target=self._snapshot_loop)
@@ -120,7 +147,7 @@ class FeedWriter:
                 futures_streams.extend([depth_stream, trade_stream])
         self._twm.start()
         if spot_streams:
-            self._spot_conn = self._twm.start_multiplex_socket(callback=self._receive_spot, streams=spot_streams)
+            self._spot_conn = self._twm.start_multiplex_socket(callback=self._route_spot, streams=spot_streams)
         if futures_streams:
-            self._futures_conn = self._twm.start_futures_multiplex_socket(callback=self._receive_futures, streams=futures_streams)
+            self._futures_conn = self._twm.start_futures_multiplex_socket(callback=self._route_futures, streams=futures_streams)
         # self._twm.join()
