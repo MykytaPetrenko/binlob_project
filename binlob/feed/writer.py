@@ -99,7 +99,10 @@ class FeedWriter:
             if symbol in self._stats:
                 symbol_stats = self._stats[symbol]
             else:
-                symbol_stats = dict(SPOT={}, FUTURES={})
+                symbol_stats = dict(
+                    SPOT=dict(depth=0, trade=0, book=0),
+                    FUTURES=dict(depth=0, trade=0, book=0)
+                )
                 self._stats[symbol] = symbol_stats
 
             if section in symbol_stats:
