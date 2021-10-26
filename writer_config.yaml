@@ -33,3 +33,9 @@ symbols:
     spot_depth_stream: '@depth@100ms'
     futures: True
     futures_depth_stream: '@depth@100ms'
+
+  - symbol: LTCUSDT
+    spot: True
+    spot_depth_stream: '@depth@100ms'
+    futures: True
+    futures_depth_stream: '@depth@100ms'

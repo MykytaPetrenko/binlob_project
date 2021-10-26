@@ -22,6 +22,7 @@ class FeedWriter:
         self._symbols = config.get('symbols')
         self._num_symbols = len(self._symbols)
         self._snapshot_thread = None
+        self._info_thread = None
         self._output_streams = dict()
         self._stats = dict()
 
@@ -32,8 +33,10 @@ class FeedWriter:
 
     def start(self):
         self._start_socket()
-        self._start_snapshot_loop()
-        self._start_info_loop()
+        self._snapshot_thread = Thread(target=self._snapshot_loop)
+        self._snapshot_thread.start()
+        self._info_thread = Thread(target=self._info_loop)
+        self._info_thread.start()
 
     def _get_file_stream(self, symbol: str, section: str, data_type: str):
         stream_name = f'{symbol.lower()}_{section.lower()}_{data_type}'
@@ -66,16 +69,24 @@ class FeedWriter:
         stream.flush()
 
     def _snapshot_loop(self):
+        first_run = True
         while True:
             for symbol in self._symbols:
                 if symbol['spot']:
                     self._write_orderbook(symbol['symbol'], 'SPOT')
-                    time.sleep(self._request_period)
+                    if first_run:
+                        pass
+                    else:
+                        time.sleep(self._request_period)
                 if symbol['futures']:
                     self._write_orderbook(symbol['symbol'], 'FUTURES')
-                    time.sleep(self._request_period)
+                    if first_run:
+                        pass
+                    else:
+                        time.sleep(self._request_period)
+            first_run = False
 
-    def _start_info_loop(self):
+    def _info_loop(self):
         while True:
             with self._lock:
                 for symbol, stats in sorted(self._stats.items()):
@@ -132,10 +143,6 @@ class FeedWriter:
 
     def _route_futures(self, msg):
         self._write_message(msg, 'FUTURES')
-
-    def _start_snapshot_loop(self):
-        self._snapshot_thread = Thread(target=self._snapshot_loop)
-        self._snapshot_thread.start()
 
     def _start_socket(self):
         spot_streams = list()
