@@ -4,12 +4,9 @@ from binlob import FeedWriter
 
 def main():
     with open('writer_config.yaml', 'r') as f:
-        try:
-            config = yaml.safe_load(f)
-        except yaml.YAMLError as exc:
-            print(exc)
+        config = yaml.safe_load(f)
 
-    writer = FeedWriter(config)
+    writer = FeedWriter(**config)
     writer.start()
 
 

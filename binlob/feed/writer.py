@@ -6,26 +6,60 @@ from datetime import datetime
 import os
 import pickle as pickle
 
-
 ReconnectingWebsocket.MAX_QUEUE_SIZE = 10000
 
 
 class FeedWriter:
-    def __init__(self, config: dict):
+    def __init__(self, **kwargs):
         self._lock = Lock()
         self._client = Client(api_key='', api_secret='')
         self._twm = ThreadedWebsocketManager(api_key='', api_secret='')
-        self._temp_dir = 'C:/temp'
-        self._output_dir = 'C:/output'
-        self._limit = config.get('limit', 100)
-        self._request_period = config.get('request_period', 60)
-        self._symbols = config.get('symbols')
-        self._num_symbols = len(self._symbols)
+
+        # output params
+        self._temp_dir = kwargs.get('temp_dir', 'temp')
+        self._output_dir = kwargs.get('output_dir', 'output')
+        self._check_dirs()
+
+        # Snapshots params
+        self._limit = kwargs.get('snapshot_limit', 100)
+        self._do_snapshots = kwargs.get('book_snapshots', True)
+        self._snapshot_period = kwargs.get('', 60)
+
+        # Stream params
+        depth_streams = kwargs.get('depth_streams', None)
+        trade_streams = kwargs.get('trade_streams', None)
+        self._futures_streams = set()
+        self._futures_tickers = set()
+        self._spot_streams = set()
+        self._spot_tickers = set()
+        # Manage depth streams
+        if depth_streams:
+            for stream in depth_streams.get('spot', list()):
+                ticker = stream.split('@')[0]
+                self._spot_streams.add(stream)
+                self._spot_tickers.add(ticker.upper())
+            for stream in depth_streams.get('futures', list()):
+                ticker = stream.split('@')[0]
+                self._futures_streams.add(stream)
+                self._futures_tickers.add(ticker.upper())
+        # Manage trade streams
+        if trade_streams:
+            for stream in trade_streams.get('spot', list()):
+                self._spot_streams.add(stream)
+            for stream in trade_streams.get('futures', list()):
+                self._futures_streams.add(stream)
+
+        self._num_streams = len(self._spot_tickers) + len(self._futures_tickers)
+        self._request_period = None
+        if self._num_streams != 0:
+            self._request_period = self._snapshot_period / self._num_streams
+
         self._snapshot_thread = None
         self._info_thread = None
         self._output_streams = dict()
         self._stats = dict()
 
+    def _check_dirs(self):
         if not os.path.exists(self._temp_dir):
             os.makedirs(self._temp_dir, exist_ok=True)
         if not os.path.exists(self._output_dir):
@@ -38,17 +72,16 @@ class FeedWriter:
         self._info_thread = Thread(target=self._info_loop)
         self._info_thread.start()
 
-    def _get_file_stream(self, symbol: str, section: str, data_type: str):
+    def _get_writer(self, symbol: str, section: str, data_type: str):
         stream_name = f'{symbol.lower()}_{section.lower()}_{data_type}'
 
         with self._lock:
-            stream, create_day = self._output_streams.get(stream_name, (None, None))
-
+            stream, creation_day = self._output_streams.get(stream_name, (None, None))
         today = datetime.utcnow()
-        if stream and today.day != create_day:
+        if stream is not None and today.day != creation_day:
             stream.close()
 
-        if today.day != create_day:
+        if today.day != creation_day:
             date_str = today.strftime('%Y-%m-%d')
             filename = f'{symbol}-{date_str}-{section}-{data_type}.pkl'
             stream = open(os.path.join(self._temp_dir, filename), 'wb')
@@ -57,12 +90,13 @@ class FeedWriter:
         return stream
 
     def _write_orderbook(self, symbol: str, section: str = 'SPOT'):
-        stream = self._get_file_stream(symbol, section, 'book')
-
+        stream = self._get_writer(symbol, section, 'book')
         if section == 'SPOT':
             orderbook = self._client.get_order_book(symbol=symbol, limit=self._limit)
         elif section == 'FUTURES':
             orderbook = self._client.futures_order_book(symbol=symbol, limit=self._limit)
+        else:
+            raise Exception(f'Incorrect section. Got {section}. Use "SPOT" or "FUTURES"')
 
         pickle.dump(orderbook, stream, protocol=pickle.HIGHEST_PROTOCOL)
         self._increment_stat(symbol, section, 'book')
@@ -71,42 +105,36 @@ class FeedWriter:
     def _snapshot_loop(self):
         first_run = True
         while True:
-            for symbol in self._symbols:
-                if symbol['spot']:
-                    self._write_orderbook(symbol['symbol'], 'SPOT')
-                    if first_run:
-                        pass
-                    else:
-                        time.sleep(self._request_period)
-                if symbol['futures']:
-                    self._write_orderbook(symbol['symbol'], 'FUTURES')
-                    if first_run:
-                        pass
-                    else:
-                        time.sleep(self._request_period)
+            for ticker in self._spot_tickers:
+                self._write_orderbook(ticker, 'SPOT')
+                if first_run:
+                    pass
+                else:
+                    time.sleep(self._request_period)
+            for ticker in self._futures_tickers:
+                self._write_orderbook(ticker, 'FUTURES')
+                if first_run:
+                    pass
+                else:
+                    time.sleep(self._request_period)
             first_run = False
 
     def _info_loop(self):
         while True:
             with self._lock:
-                for symbol, stats in sorted(self._stats.items()):
+                for symbol, symbol_stats in sorted(self._stats.items()):
                     print('\t' + symbol)
-                    for section, stats in stats.items():
+                    for section, section_stats in symbol_stats.items():
                         line = f'{section:9s}:'
-                        for datatype, stats in stats.items():
-                            line += f'\t{datatype} - {stats}'
+                        for datatype, stream_stats in section_stats.items():
+                            line += f'\t{datatype} - {stream_stats}'
                         print(line)
                 print('-' * 60)
-            self._refresh_stats()
-            time.sleep(11)
-
-    def _refresh_stats(self):
-        with self._lock:
-            self._stats.clear()
+                self._stats.clear()
+            time.sleep(1)
 
     def _increment_stat(self, symbol, section, datatype):
         with self._lock:
-
             if symbol in self._stats:
                 symbol_stats = self._stats[symbol]
             else:
@@ -132,7 +160,7 @@ class FeedWriter:
             data = msg.get('data')
             datatype = 'depth' if data['e'] == 'depthUpdate' else 'trade'
             symbol = data['s']
-            stream = self._get_file_stream(symbol, section, datatype)
+            stream = self._get_writer(symbol, section, datatype)
             pickle.dump(data, stream, protocol=pickle.HIGHEST_PROTOCOL)
             self._increment_stat(symbol, section, datatype)
         else:
@@ -145,19 +173,16 @@ class FeedWriter:
         self._write_message(msg, 'FUTURES')
 
     def _start_socket(self):
-        spot_streams = list()
-        futures_streams = list()
-        for symbol in self._symbols:
-            trade_stream = symbol['symbol'].lower() + '@trade'
-            if symbol['spot']:
-                depth_stream = symbol['symbol'].lower() + symbol['spot_depth_stream']
-                spot_streams.extend([depth_stream, trade_stream])
-            if symbol['futures']:
-                depth_stream = symbol['symbol'].lower() + symbol['futures_depth_stream']
-                futures_streams.extend([depth_stream, trade_stream])
+        self._twm.daemon = True
         self._twm.start()
-        if spot_streams:
-            self._spot_conn = self._twm.start_multiplex_socket(callback=self._route_spot, streams=spot_streams)
-        if futures_streams:
-            self._futures_conn = self._twm.start_futures_multiplex_socket(callback=self._route_futures, streams=futures_streams)
+        if self._spot_streams:
+            self._spot_conn = self._twm.start_multiplex_socket(
+                callback=self._route_spot,
+                streams=list(self._spot_streams)
+            )
+        if self._futures_streams:
+            self._futures_conn = self._twm.start_futures_multiplex_socket(
+                callback=self._route_futures,
+                streams=list(self._futures_streams)
+            )
         # self._twm.join()

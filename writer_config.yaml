@@ -1,7 +1,13 @@
-limit: 100
+
 output_dir: 'C:/temp/'
 temp_dir: 'C:/temp/'
-request_period: 60
+
+# Write limit order book snapshots or not
+book_snapshots: True
+# Period between LOB snapshots through http request
+snapshot_period: 60*5
+# depth limit
+snapshot_limit: 100
 
 
 #
@@ -15,27 +21,38 @@ request_period: 60
 # - @depth - depth updates period is 250ms
 # - @depth@500ms - depth updates period is 500ms
 # - @depth@100ms - depth updates period is 100ms (if existing)
-symbols:
-  - symbol: BNBUSDT
-    spot: True
-    spot_depth_stream: '@depth@100ms'
-    futures: True
-    futures_depth_stream: '@depth@100ms'
 
-  - symbol: BTCUSDT
-    spot: True
-    spot_depth_stream: '@depth@100ms'
-    futures: True
-    futures_depth_stream: '@depth@100ms'
+depth_streams: {
+    spot: [
+            'bnbusdt@depth@100ms',
+            'btcusdt@depth@100ms',
+            'ethusdt@depth@100ms',
+            'ltcusdt@depth@100ms',
+            'oneusdt@depth@100ms'
+    ],
+    futures: [
+            'bnbusdt@depth@100ms',
+            'btcusdt@depth@100ms',
+            'ethusdt@depth@100ms',
+            'ltcusdt@depth@100ms',
+            'oneusdt@depth@100ms'
+    ]
+}
 
-  - symbol: ETHUSDT
-    spot: True
-    spot_depth_stream: '@depth@100ms'
-    futures: True
-    futures_depth_stream: '@depth@100ms'
+trade_streams: {
+    spot: [
+            'bnbusdt@trade',
+            'btcusdt@trade',
+            'ethusdt@trade',
+            'ltcusdt@trade',
+            'oneusdt@trade'
+    ],
+    futures: [
+            'bnbusdt@trade',
+            'btcusdt@trade',
+            'ethusdt@trade',
+            'ltcusdt@trade',
+            'oneusdt@trade'
+    ]
+}
 
-  - symbol: LTCUSDT
-    spot: True
-    spot_depth_stream: '@depth@100ms'
-    futures: True
-    futures_depth_stream: '@depth@100ms'
