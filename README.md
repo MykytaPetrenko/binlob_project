@@ -1,6 +1,10 @@
 # BinLOB Project
 Visualization of LOB from binance
 
+### How to install
+
+`pip install git+https://github.com/MykytaPetrenko/binlob_project.git`
+
 ### Main features
 
 ##### Write orderbook and trade data to pickle files
