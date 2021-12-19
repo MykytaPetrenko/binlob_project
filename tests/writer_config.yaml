@@ -1,6 +1,6 @@
 
-output_dir: 'C:/temp/'
-temp_dir: 'C:/temp/'
+output_dir: 'C:/tmp/CryptoData'
+temp_dir: 'C:/tmp/CryptoData'
 
 # Write limit order book snapshots or not
 book_snapshots: True

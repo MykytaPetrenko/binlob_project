@@ -1,9 +1,13 @@
 import yaml
 from binlob import FeedWriter
+import logging
+
+
+logging.basicConfig(level=logging.ERROR, filename='log.txt')
 
 
 def main():
-    with open('writer_config.yaml', 'r') as f:
+    with open('tests/writer_config.yaml', 'r') as f:
         config = yaml.safe_load(f)
 
     writer = FeedWriter(**config)
