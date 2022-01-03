@@ -3,7 +3,7 @@ from binlob import FeedWriter
 import logging
 
 
-logging.basicConfig(level=logging.ERROR, filename='log.txt')
+logging.basicConfig(level=logging.ERROR, filename='writer.log')
 
 
 def main():

@@ -92,13 +92,13 @@ class FeedWriter:
                         orderbook = await client.get_order_book(symbol=ticker, limit=self._limit)
                     except Exception as ex:
                         self._log.error(f'Cannot get spot orderbook: {str(ex)}')
-                        return
+                        continue
                 elif section == 'FUTURES':
                     try:
                         orderbook = await client.futures_order_book(symbol=ticker, limit=self._limit)
                     except Exception as ex:
                         self._log.error(f'Cannot get futures orderbook: {str(ex)}')
-                        return
+                        continue
                 else:
                     raise Exception(f'Incorrect section. Got {section}. Use "SPOT" or "FUTURES"')
                 today = datetime.utcnow()
@@ -178,15 +178,11 @@ class FeedWriter:
     async def _ws_track_loop(self, section: str = 'SPOT'):
         client = AsyncClient(api_key='', api_secret='')
         bwm = BinanceSocketManager(client)
-
-        if section.lower() == 'futures':
-            streams = list(self._futures_streams)
+        section = section.upper()
+        if section == 'FUTURES':
+            ws = bwm.futures_multiplex_socket(list(self._futures_streams))
         else:
-            streams = list(self._spot_streams)
-
-        ws = bwm.multiplex_socket(
-            streams
-        )
+            ws = bwm.multiplex_socket(list(self._spot_streams))
 
         async with ws as ws_context:
             while True:
